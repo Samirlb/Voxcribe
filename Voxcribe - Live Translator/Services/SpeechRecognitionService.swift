@@ -182,6 +182,15 @@ final class SpeechRecognitionService: @unchecked Sendable {
     }
 
     private func restartRecognitionTask() {
+        restartRecognitionTaskInternal()
+    }
+
+    /// Called externally when silence/stability detection finalizes partial text
+    func forceRestart() {
+        restartRecognitionTaskInternal()
+    }
+
+    private func restartRecognitionTaskInternal() {
         guard !isRestarting, !isPaused else { return }
         isRestarting = true
 

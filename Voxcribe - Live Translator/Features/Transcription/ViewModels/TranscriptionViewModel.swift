@@ -41,6 +41,10 @@ final class TranscriptionViewModel {
     private var pendingTTSQueue: [(text: String, language: Language)] = []
     private var ttsTask: Task<Void, Never>?
 
+    // Text-stability tracking: finalize when partial text stops changing
+    private var lastPartialTextSnapshot: String = ""
+    private var partialTextStableTime: Date = Date()
+
     // MARK: - Lifecycle
 
     func startListening() {
@@ -132,6 +136,11 @@ final class TranscriptionViewModel {
         speechService.onPartialResult = { [weak self] text in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Track whether the text content actually changed
+                if text != self.lastPartialTextSnapshot {
+                    self.lastPartialTextSnapshot = text
+                    self.partialTextStableTime = Date()
+                }
                 self.currentPartialText = text
                 self.lastSpeechTime = Date()
             }
@@ -262,19 +271,36 @@ final class TranscriptionViewModel {
     private func startSilenceDetection() {
         silenceTimer?.invalidate()
         lastSpeechTime = Date()
+        lastPartialTextSnapshot = ""
+        partialTextStableTime = Date()
 
         silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard self.state == .listening, !self.isSpeakingTTS else { return }
+                guard !self.currentPartialText.isEmpty else { return }
 
-                let silenceDuration = Date().timeIntervalSince(self.lastSpeechTime)
+                let now = Date()
+                let silenceDuration = now.timeIntervalSince(self.lastSpeechTime)
+                let textStableDuration = now.timeIntervalSince(self.partialTextStableTime)
                 let isQuiet = self.audioService.audioLevel < 0.05
 
-                if silenceDuration > self.silenceTimeout && isQuiet && !self.currentPartialText.isEmpty {
+                // Finalize if audio is quiet and no new partial results
+                let silenceTriggered = silenceDuration > self.silenceTimeout && isQuiet
+
+                // Finalize if partial text hasn't changed for silenceTimeout
+                // (handles languages like Chinese where isFinal rarely fires,
+                // and system audio where audio level never drops)
+                let stabilityTriggered = textStableDuration > self.silenceTimeout
+
+                if silenceTriggered || stabilityTriggered {
                     let text = self.currentPartialText
                     self.currentPartialText = ""
+                    self.lastPartialTextSnapshot = ""
                     self.finalizeCurrentEntry(text: text)
+
+                    // Restart the recognition task to clear accumulated state
+                    self.speechService.forceRestart()
                 }
             }
         }
