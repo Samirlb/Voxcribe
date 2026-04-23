@@ -13,6 +13,9 @@ final class TranscriptionViewModel {
     var audioLevel: Float = 0
     var detectedLanguage: Language?
 
+    // MARK: - Audio Source
+    var audioSource: AudioSource = .microphone
+
     // MARK: - Settings (bound from SettingsViewModel)
     var sourceLanguage: Language = .english
     var targetLanguage: Language = .spanish
@@ -56,7 +59,7 @@ final class TranscriptionViewModel {
         configureCallbacks()
 
         do {
-            try audioService.startCapturing()
+            try audioService.startCapturing(source: audioSource)
             speechService.startRecognition(language: language)
             state = .listening
             lastFinalizedText = ""
@@ -245,7 +248,7 @@ final class TranscriptionViewModel {
 
         // Resume audio capture and recognition
         do {
-            try audioService.startCapturing()
+            try audioService.startCapturing(source: audioSource)
         } catch {
             AppLogger.audio.error("Failed to restart audio: \(error.localizedDescription)")
         }

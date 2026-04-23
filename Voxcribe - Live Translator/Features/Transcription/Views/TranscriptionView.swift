@@ -178,52 +178,99 @@ struct TranscriptionView: View {
     // MARK: - Control Bar
 
     private var controlBar: some View {
-        HStack(spacing: VoxcribeTokens.Spacing.md) {
-            // Source language
-            languagePicker(
-                selection: settings.conversationMode
-                    ? $viewModel.conversationController.languageA
-                    : $viewModel.sourceLanguage,
-                label: settings.conversationMode ? "A" : "From"
-            )
-
-            Button {
-                withAnimation(VoxcribeTokens.Animation.smooth) {
-                    viewModel.swapLanguages()
-                }
-            } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 32, height: 32)
-                    .background(Circle().fill(.ultraThinMaterial))
+        VStack(spacing: VoxcribeTokens.Spacing.sm) {
+            // Audio source toggle (only when multiple sources available)
+            if AudioSource.availableSources.count > 1 {
+                audioSourcePicker
             }
-            .buttonStyle(.plain)
 
-            // Target language
-            languagePicker(
-                selection: settings.conversationMode
-                    ? $viewModel.conversationController.languageB
-                    : $viewModel.targetLanguage,
-                label: settings.conversationMode ? "B" : "To"
-            )
+            HStack(spacing: VoxcribeTokens.Spacing.md) {
+                // Source language
+                languagePicker(
+                    selection: settings.conversationMode
+                        ? $viewModel.conversationController.languageA
+                        : $viewModel.sourceLanguage,
+                    label: settings.conversationMode ? "A" : "From"
+                )
 
-            Spacer()
-
-            // Record button
-            Button {
-                withAnimation(VoxcribeTokens.Animation.smooth) {
-                    viewModel.toggleListening()
+                Button {
+                    withAnimation(VoxcribeTokens.Animation.smooth) {
+                        viewModel.swapLanguages()
+                    }
+                } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(.ultraThinMaterial))
                 }
-            } label: {
-                Image(systemName: isActive ? "stop.fill" : "mic.fill")
+                .buttonStyle(.plain)
+
+                // Target language
+                languagePicker(
+                    selection: settings.conversationMode
+                        ? $viewModel.conversationController.languageB
+                        : $viewModel.targetLanguage,
+                    label: settings.conversationMode ? "B" : "To"
+                )
+
+                Spacer()
+
+                // Record button
+                Button {
+                    withAnimation(VoxcribeTokens.Animation.smooth) {
+                        viewModel.toggleListening()
+                    }
+                } label: {
+                    Image(systemName: isActive ? "stop.fill" : "mic.fill")
+                }
+                .buttonStyle(RecordButtonStyle(isRecording: isActive))
             }
-            .buttonStyle(RecordButtonStyle(isRecording: isActive))
         }
         .padding(.horizontal, VoxcribeTokens.Spacing.md)
         .padding(.vertical, VoxcribeTokens.Spacing.md)
         .glassCard()
+    }
+
+    private var audioSourcePicker: some View {
+        HStack(spacing: VoxcribeTokens.Spacing.sm) {
+            ForEach(AudioSource.availableSources) { source in
+                Button {
+                    guard !isActive else { return }
+                    withAnimation(VoxcribeTokens.Animation.smooth) {
+                        viewModel.audioSource = source
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: source.icon)
+                            .font(.system(size: 12, weight: .medium))
+                        Text(source.displayName)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(viewModel.audioSource == source
+                                  ? Color.accentColor.opacity(0.2)
+                                  : Color.clear)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(viewModel.audioSource == source
+                                          ? Color.accentColor.opacity(0.5)
+                                          : Color.secondary.opacity(0.2),
+                                          lineWidth: 1)
+                    )
+                    .foregroundStyle(viewModel.audioSource == source
+                                    ? Color.accentColor : .secondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(isActive)
+            }
+        }
     }
 
     private func languagePicker(selection: Binding<Language>, label: String) -> some View {
