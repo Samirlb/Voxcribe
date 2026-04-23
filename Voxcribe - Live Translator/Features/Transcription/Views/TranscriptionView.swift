@@ -137,7 +137,8 @@ struct TranscriptionView: View {
                                   ? VoxcribeTokens.Colors.speakerA
                                   : VoxcribeTokens.Colors.speakerB)
                             .frame(width: 6, height: 6)
-                        Text(viewModel.conversationController.currentRecognizerLanguage.displayName)
+                        let lang = viewModel.conversationController.currentRecognizerLanguage
+                        Text("\(lang.flag) \(lang.shortName)")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -147,7 +148,7 @@ struct TranscriptionView: View {
                 Spacer()
 
                 if !settings.conversationMode, let detected = viewModel.detectedLanguage {
-                    Text(detected.displayName)
+                    Text("\(detected.flag) \(detected.shortName)")
                         .languagePill(color: .green)
                         .transition(.scale.combined(with: .opacity))
                 }
@@ -270,7 +271,7 @@ struct TranscriptionView: View {
             }
             pillButton(
                 icon: "person.2.fill",
-                label: "Conversation",
+                label: "Conversation (Beta)",
                 isSelected: settings.conversationMode
             ) {
                 settings.conversationMode = true
@@ -335,7 +336,7 @@ struct TranscriptionView: View {
                 .textCase(.uppercase)
             Picker(label, selection: selection) {
                 ForEach(Language.allCases) { lang in
-                    Text(lang.displayName).tag(lang)
+                    Text("\(lang.flag) \(lang.shortName)").tag(lang)
                 }
             }
             .labelsHidden()

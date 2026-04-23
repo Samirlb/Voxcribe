@@ -108,7 +108,7 @@ private struct ChatBubbleView: View {
                             .font(.caption2)
                             .fontWeight(.semibold)
                             .foregroundStyle(speakerColor)
-                        Text(entry.sourceLanguage.displayName)
+                        Text("\(entry.sourceLanguage.flag) \(entry.sourceLanguage.shortName)")
                             .languagePill(color: speakerColor)
                     }
                 }

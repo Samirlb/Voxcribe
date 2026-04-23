@@ -51,7 +51,7 @@ struct SettingsView: View {
                 Spacer()
                 Picker("", selection: $settings.targetLanguage) {
                     ForEach(Language.allCases) { lang in
-                        Text(lang.displayName).tag(lang)
+                        Text("\(lang.flag) \(lang.displayName)").tag(lang)
                     }
                 }
                 .labelsHidden()
