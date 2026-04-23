@@ -1,0 +1,48 @@
+diff --git a/Voxcribe - Live Translator/ContentView.swift b/Voxcribe - Live Translator/ContentView.swift
+deleted file mode 100644
+index 2e505db..0000000
+--- a/Voxcribe - Live Translator/ContentView.swift	
++++ /dev/null
+@@ -1,24 +0,0 @@
+-//
+-//  ContentView.swift
+-//  Voxcribe - Live Translator
+-//
+-//  Created by Samir on 23/04/26.
+-//
+-
+-import SwiftUI
+-
+-struct ContentView: View {
+-    var body: some View {
+-        VStack {
+-            Image(systemName: "globe")
+-                .imageScale(.large)
+-                .foregroundStyle(.tint)
+-            Text("Hello, world!")
+-        }
+-        .padding()
+-    }
+-}
+-
+-#Preview {
+-    ContentView()
+-}
+diff --git a/Voxcribe - Live Translator/Voxcribe___Live_TranslatorApp.swift b/Voxcribe - Live Translator/Voxcribe___Live_TranslatorApp.swift
+deleted file mode 100644
+index 53ae0fa..0000000
+--- a/Voxcribe - Live Translator/Voxcribe___Live_TranslatorApp.swift	
++++ /dev/null
+@@ -1,12 +0,0 @@
+-//___FILEHEADER___
+-
+-import SwiftUI
+-
+-@main
+-struct ___PACKAGENAME:identifier___App: App {
+-    var body: some Scene {
+-        WindowGroup {
+-            ContentView()
+-        }
+-    }
+-}
