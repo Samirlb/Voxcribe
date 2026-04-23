@@ -5,29 +5,36 @@ struct TranscriptionView: View {
     @State private var settings = SettingsViewModel()
     @State private var showSettings = false
 
+    private var isActive: Bool {
+        viewModel.state == .listening || viewModel.state == .processing
+    }
+
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                // Status bar
-                statusBar
+            ZStack {
+                // Gradient background
+                backgroundGradient
 
-                Divider()
+                VStack(spacing: 0) {
+                    statusBar
+                        .padding(.horizontal, VoxcribeTokens.Spacing.lg)
+                        .padding(.top, VoxcribeTokens.Spacing.sm)
 
-                // Chat area
-                ChatTranscriptionView(
-                    entries: viewModel.entries,
-                    currentPartialText: viewModel.currentPartialText,
-                    showOriginal: settings.showOriginalText,
-                    showPartial: settings.showPartialResults,
-                    fontSize: settings.fontSize,
-                    conversationMode: settings.conversationMode
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Chat area
+                    ChatTranscriptionView(
+                        entries: viewModel.entries,
+                        currentPartialText: viewModel.currentPartialText,
+                        showOriginal: settings.showOriginalText,
+                        showPartial: settings.showPartialResults,
+                        fontSize: settings.fontSize,
+                        conversationMode: settings.conversationMode
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Divider()
-
-                // Control bar
-                controlBar
+                    controlBar
+                        .padding(.horizontal, VoxcribeTokens.Spacing.lg)
+                        .padding(.bottom, VoxcribeTokens.Spacing.md)
+                }
             }
             .navigationTitle("Voxcribe")
             #if os(iOS)
@@ -38,7 +45,8 @@ struct TranscriptionView: View {
                     Button {
                         showSettings = true
                     } label: {
-                        Image(systemName: "gear")
+                        Image(systemName: "gearshape")
+                            .symbolRenderingMode(.hierarchical)
                     }
                 }
 
@@ -48,6 +56,7 @@ struct TranscriptionView: View {
                             viewModel.clearEntries()
                         } label: {
                             Image(systemName: "trash")
+                                .symbolRenderingMode(.hierarchical)
                         }
                     }
                 }
@@ -55,9 +64,7 @@ struct TranscriptionView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView(settings: settings)
             }
-            .onAppear {
-                syncSettings()
-            }
+            .onAppear { syncSettings() }
             .onChange(of: settings.targetLanguage) { syncSettings() }
             .onChange(of: settings.translationEngine) { syncSettings() }
             .onChange(of: settings.ttsEnabled) { syncSettings() }
@@ -72,6 +79,32 @@ struct TranscriptionView: View {
                 await viewModel.permissionsManager.requestAllPermissions()
             }
         }
+    }
+
+    // MARK: - Background
+
+    private var backgroundGradient: some View {
+        #if os(iOS)
+        LinearGradient(
+            colors: [
+                Color(.systemBackground),
+                Color(.systemBackground).opacity(0.95)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+        #else
+        LinearGradient(
+            colors: [
+                Color(.windowBackgroundColor),
+                Color(.windowBackgroundColor).opacity(0.95)
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+        .ignoresSafeArea()
+        #endif
     }
 
     // MARK: - Status Bar
@@ -93,14 +126,23 @@ struct TranscriptionView: View {
                 if let detected = viewModel.detectedLanguage {
                     Text(detected.displayName)
                         .languagePill(color: .green)
+                        .transition(.scale.combined(with: .opacity))
                 }
 
-                AudioLevelIndicator(level: viewModel.audioLevel)
+                if viewModel.ttsService.isSpeaking {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .symbolEffect(.variableColor.iterative)
+                }
+
+                AudioLevelIndicator(level: viewModel.audioService.audioLevel)
             }
         }
-        .padding(.horizontal, VoxcribeTokens.Spacing.lg)
+        .padding(.horizontal, VoxcribeTokens.Spacing.md)
         .padding(.vertical, VoxcribeTokens.Spacing.sm)
-        .background(.ultraThinMaterial)
+        .glassCard(cornerRadius: VoxcribeTokens.CornerRadius.md)
+        .animation(VoxcribeTokens.Animation.standard, value: viewModel.state)
     }
 
     @ViewBuilder
@@ -111,13 +153,23 @@ struct TranscriptionView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         case .listening:
-            Label("Listening", systemImage: "waveform")
-                .font(.caption)
-                .foregroundStyle(.green)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(.green)
+                    .frame(width: 6, height: 6)
+                    .shadow(color: .green.opacity(0.6), radius: 3)
+                Text("Listening")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
         case .processing:
-            Label("Translating", systemImage: "arrow.triangle.2.circlepath")
-                .font(.caption)
-                .foregroundStyle(.orange)
+            HStack(spacing: 4) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Translating…")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         case .error:
             EmptyView()
         }
@@ -126,7 +178,7 @@ struct TranscriptionView: View {
     // MARK: - Control Bar
 
     private var controlBar: some View {
-        HStack(spacing: VoxcribeTokens.Spacing.lg) {
+        HStack(spacing: VoxcribeTokens.Spacing.md) {
             // Source language
             languagePicker(
                 selection: settings.conversationMode
@@ -135,12 +187,17 @@ struct TranscriptionView: View {
                 label: settings.conversationMode ? "A" : "From"
             )
 
-            // Swap
             Button {
-                viewModel.swapLanguages()
+                withAnimation(VoxcribeTokens.Animation.smooth) {
+                    viewModel.swapLanguages()
+                }
             } label: {
                 Image(systemName: "arrow.left.arrow.right")
-                    .font(.title3)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(.ultraThinMaterial))
             }
             .buttonStyle(.plain)
 
@@ -156,22 +213,25 @@ struct TranscriptionView: View {
 
             // Record button
             Button {
-                viewModel.toggleListening()
+                withAnimation(VoxcribeTokens.Animation.smooth) {
+                    viewModel.toggleListening()
+                }
             } label: {
-                Image(systemName: viewModel.state == .listening ? "stop.fill" : "mic.fill")
+                Image(systemName: isActive ? "stop.fill" : "mic.fill")
             }
-            .buttonStyle(RecordButtonStyle(isRecording: viewModel.state == .listening))
+            .buttonStyle(RecordButtonStyle(isRecording: isActive))
         }
-        .padding(.horizontal, VoxcribeTokens.Spacing.lg)
+        .padding(.horizontal, VoxcribeTokens.Spacing.md)
         .padding(.vertical, VoxcribeTokens.Spacing.md)
-        .background(.ultraThinMaterial)
+        .glassCard()
     }
 
     private func languagePicker(selection: Binding<Language>, label: String) -> some View {
         VStack(spacing: 2) {
             Text(label)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
             Picker(label, selection: selection) {
                 ForEach(Language.allCases) { lang in
                     Text(lang.displayName).tag(lang)
@@ -181,6 +241,7 @@ struct TranscriptionView: View {
             #if os(iOS)
             .pickerStyle(.menu)
             #endif
+            .tint(.primary)
         }
     }
 

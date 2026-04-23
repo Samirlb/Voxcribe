@@ -23,6 +23,9 @@ final class SpeechRecognitionService: @unchecked Sendable {
     private let maxRetries = 3
     private let autoRestartInterval: TimeInterval = 45
 
+    private var isRestarting = false
+    private(set) var isPaused = false
+
     private let languageRecognizer = NLLanguageRecognizer()
     private var languageConfirmationCount = 0
     private var pendingLanguage: Language?
@@ -39,6 +42,8 @@ final class SpeechRecognitionService: @unchecked Sendable {
     func startRecognition(language: Language) {
         currentLanguage = language
         retryCount = 0
+        isPaused = false
+        isRestarting = false
 
         setupRecognizer(for: language)
         startNetworkMonitoring()
@@ -47,6 +52,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
     }
 
     func appendAudioBuffer(_ buffer: AVAudioPCMBuffer) {
+        guard !isPaused else { return }
         recognitionRequest?.append(buffer)
     }
 
@@ -63,12 +69,40 @@ final class SpeechRecognitionService: @unchecked Sendable {
         recognizer = nil
 
         isRecognizing = false
+        isPaused = false
+        isRestarting = false
         currentPartialText = ""
         languageDetectionBuffer = ""
         languageConfirmationCount = 0
         pendingLanguage = nil
 
         AppLogger.speech.info("Speech recognition stopped")
+    }
+
+    func pause() {
+        guard isRecognizing, !isPaused else { return }
+        isPaused = true
+        restartTimer?.invalidate()
+        restartTimer = nil
+
+        recognitionTask?.cancel()
+        recognitionRequest?.endAudio()
+        recognitionTask = nil
+        recognitionRequest = nil
+
+        AppLogger.speech.info("Speech recognition paused (TTS)")
+    }
+
+    func resume() {
+        guard isRecognizing, isPaused else { return }
+        isPaused = false
+        isRestarting = false
+        retryCount = 0
+
+        setupRecognizer(for: currentLanguage)
+        beginRecognitionTask()
+        scheduleAutoRestart()
+        AppLogger.speech.info("Speech recognition resumed")
     }
 
     func changeLanguage(_ language: Language) {
@@ -100,6 +134,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
             AppLogger.speech.error("Recognizer unavailable, cannot start task")
             return
         }
+        guard !isPaused else { return }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -117,10 +152,13 @@ final class SpeechRecognitionService: @unchecked Sendable {
                 if result.isFinal {
                     Task { @MainActor [weak self] in
                         guard let self else { return }
+                        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                         self.currentPartialText = ""
-                        self.detectLanguage(in: text)
-                        self.onFinalResult?(text)
-                        AppLogger.speech.debug("Final: \(text.prefix(60))...")
+                        if !trimmed.isEmpty {
+                            self.detectLanguage(in: trimmed)
+                            self.onFinalResult?(trimmed)
+                            AppLogger.speech.debug("Final: \(trimmed.prefix(60))...")
+                        }
                     }
                     self.restartRecognitionTask()
                 } else {
@@ -144,13 +182,22 @@ final class SpeechRecognitionService: @unchecked Sendable {
     }
 
     private func restartRecognitionTask() {
+        guard !isRestarting, !isPaused else { return }
+        isRestarting = true
+
         recognitionTask?.cancel()
         recognitionRequest?.endAudio()
         recognitionTask = nil
         recognitionRequest = nil
 
-        beginRecognitionTask()
-        scheduleAutoRestart()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .milliseconds(300))
+            self.isRestarting = false
+            guard self.isRecognizing, !self.isPaused else { return }
+            self.beginRecognitionTask()
+            self.scheduleAutoRestart()
+        }
     }
 
     private func handleRecognitionError(_ error: Error) {
@@ -161,8 +208,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
         }
 
         if nsError.domain == "kAFAssistantErrorDomain" && nsError.code == 1110 {
-            AppLogger.speech.debug("No speech detected, restarting...")
-            restartRecognitionTask()
+            AppLogger.speech.debug("No speech detected, waiting for auto-restart")
             return
         }
 
@@ -172,8 +218,11 @@ final class SpeechRecognitionService: @unchecked Sendable {
         if retryCount <= maxRetries {
             AppLogger.speech.info("Retrying recognition (\(self.retryCount)/\(self.maxRetries))")
             Task {
-                try? await Task.sleep(for: .milliseconds(500 * retryCount))
-                restartRecognitionTask()
+                try? await Task.sleep(for: .seconds(1))
+                guard !self.isPaused else { return }
+                self.setupRecognizer(for: self.currentLanguage)
+                self.isRestarting = false
+                self.restartRecognitionTask()
             }
         } else {
             AppLogger.speech.error("Max retries reached, stopping recognition")
@@ -188,7 +237,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isRecognizing else { return }
+                guard let self, self.isRecognizing, !self.isPaused else { return }
                 AppLogger.speech.debug("Auto-restart after \(self.autoRestartInterval)s")
                 self.restartRecognitionTask()
             }
@@ -247,7 +296,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
 
                 if wasOnline != self.isOnline {
                     AppLogger.speech.info("Network: \(self.isOnline ? "online" : "offline")")
-                    if self.isRecognizing {
+                    if self.isRecognizing, !self.isPaused {
                         self.restartRecognitionTask()
                     }
                 }

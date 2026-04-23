@@ -33,8 +33,10 @@ enum VoxcribeTokens {
         static let partialText = Color.secondary
         static let finalText = Color.primary
         static let translatedText = Color.accentColor
-        static let background = Color.white
-        static let secondaryBackground = Color.secondary
+
+        static let bubbleOutgoing = Color.blue.opacity(0.15)
+        static let bubbleIncoming = Color(.systemGray).opacity(0.12)
+        static let glassBorder = Color.white.opacity(0.15)
 
         #if os(macOS)
         static let floatingBackground = Color(.windowBackgroundColor).opacity(0.95)
@@ -45,5 +47,6 @@ enum VoxcribeTokens {
         static let quick = SwiftUI.Animation.easeInOut(duration: 0.15)
         static let standard = SwiftUI.Animation.easeInOut(duration: 0.25)
         static let smooth = SwiftUI.Animation.spring(response: 0.35, dampingFraction: 0.8)
+        static let pulse = SwiftUI.Animation.easeInOut(duration: 0.8).repeatForever(autoreverses: true)
     }
 }

@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import OSLog
 
 @Observable
 @MainActor
@@ -32,7 +33,10 @@ final class TranscriptionViewModel {
     // MARK: - Private
     private var silenceTimer: Timer?
     private var lastSpeechTime: Date = Date()
-    private var currentEntryID: UUID?
+    private var lastFinalizedText: String = ""
+    private var isSpeakingTTS = false
+    private var pendingTTSQueue: [(text: String, language: Language)] = []
+    private var ttsTask: Task<Void, Never>?
 
     // MARK: - Lifecycle
 
@@ -55,6 +59,7 @@ final class TranscriptionViewModel {
             try audioService.startCapturing()
             speechService.startRecognition(language: language)
             state = .listening
+            lastFinalizedText = ""
             startSilenceDetection()
         } catch {
             state = .error(error.localizedDescription)
@@ -65,8 +70,11 @@ final class TranscriptionViewModel {
         silenceTimer?.invalidate()
         silenceTimer = nil
 
-        audioService.stopCapturing()
         speechService.stopRecognition()
+        audioService.stopCapturing()
+        ttsTask?.cancel()
+        ttsTask = nil
+        isSpeakingTTS = false
 
         if !currentPartialText.isEmpty {
             finalizeCurrentEntry(text: currentPartialText)
@@ -77,7 +85,7 @@ final class TranscriptionViewModel {
     }
 
     func toggleListening() {
-        if state == .listening {
+        if state == .listening || state == .processing {
             stopListening()
         } else {
             startListening()
@@ -88,6 +96,7 @@ final class TranscriptionViewModel {
         entries.removeAll()
         ttsService.clearHistory()
         translationService.clearCache()
+        lastFinalizedText = ""
     }
 
     func swapLanguages() {
@@ -100,7 +109,10 @@ final class TranscriptionViewModel {
         }
 
         if state == .listening {
-            speechService.changeLanguage(sourceLanguage)
+            let newLang = conversationController.isActive
+                ? conversationController.activeSpeakerLanguage()
+                : sourceLanguage
+            speechService.changeLanguage(newLang)
         }
     }
 
@@ -109,7 +121,8 @@ final class TranscriptionViewModel {
     private func configureCallbacks() {
         audioService.setBufferHandler { [weak self] buffer in
             Task { @MainActor [weak self] in
-                self?.speechService.appendAudioBuffer(buffer)
+                guard let self, !self.isSpeakingTTS else { return }
+                self.speechService.appendAudioBuffer(buffer)
             }
         }
 
@@ -126,6 +139,7 @@ final class TranscriptionViewModel {
                 guard let self else { return }
                 self.finalizeCurrentEntry(text: text)
                 self.currentPartialText = ""
+                self.lastSpeechTime = Date()
             }
         }
 
@@ -146,6 +160,10 @@ final class TranscriptionViewModel {
     private func finalizeCurrentEntry(text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Prevent duplicate translations of the same text
+        if trimmed == lastFinalizedText { return }
+        lastFinalizedText = trimmed
 
         let source: Language
         let target: Language
@@ -173,31 +191,67 @@ final class TranscriptionViewModel {
         let entryID = entry.id
 
         Task {
-            await translateEntry(id: entryID, text: trimmed, source: source, target: target)
+            await translateAndSpeak(id: entryID, text: trimmed, source: source, target: target)
         }
     }
 
-    private func translateEntry(id: UUID, text: String, source: Language, target: Language) async {
+    private func translateAndSpeak(id: UUID, text: String, source: Language, target: Language) async {
+        let previousState = state
         state = .processing
 
-        if let translated = await translationService.translate(
+        guard let translated = await translationService.translate(
             text,
             from: source,
             to: target,
             engine: translationEngine
-        ) {
-            if let index = entries.firstIndex(where: { $0.id == id }) {
-                entries[index].translatedText = translated
-            }
+        ) else {
+            if state == .processing { state = previousState }
+            return
+        }
 
-            if ttsEnabled {
-                ttsService.speak(translated, in: target)
-            }
+        if let index = entries.firstIndex(where: { $0.id == id }) {
+            entries[index].translatedText = translated
         }
 
         if state == .processing {
             state = .listening
         }
+
+        // TTS with audio coordination to prevent feedback loop
+        guard ttsEnabled else { return }
+        await speakWithCoordination(text: translated, language: target)
+    }
+
+    /// Pauses recognition, speaks TTS, then resumes recognition
+    private func speakWithCoordination(text: String, language: Language) async {
+        guard state == .listening || state == .processing else { return }
+
+        isSpeakingTTS = true
+        speechService.pause()
+        audioService.stopCapturing()
+
+        // Small delay to let audio hardware settle
+        try? await Task.sleep(for: .milliseconds(150))
+
+        await ttsService.speakAndWait(text, in: language)
+
+        // Delay before resuming to avoid picking up echo
+        try? await Task.sleep(for: .milliseconds(300))
+
+        guard state == .listening || state == .processing else {
+            isSpeakingTTS = false
+            return
+        }
+
+        // Resume audio capture and recognition
+        do {
+            try audioService.startCapturing()
+        } catch {
+            AppLogger.audio.error("Failed to restart audio: \(error.localizedDescription)")
+        }
+        speechService.resume()
+        isSpeakingTTS = false
+        lastSpeechTime = Date()
     }
 
     // MARK: - Silence Detection
@@ -208,14 +262,16 @@ final class TranscriptionViewModel {
 
         silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.state == .listening else { return }
+                guard let self else { return }
+                guard self.state == .listening, !self.isSpeakingTTS else { return }
 
                 let silenceDuration = Date().timeIntervalSince(self.lastSpeechTime)
                 let isQuiet = self.audioService.audioLevel < 0.05
 
                 if silenceDuration > self.silenceTimeout && isQuiet && !self.currentPartialText.isEmpty {
-                    self.finalizeCurrentEntry(text: self.currentPartialText)
+                    let text = self.currentPartialText
                     self.currentPartialText = ""
+                    self.finalizeCurrentEntry(text: text)
                 }
             }
         }

@@ -14,12 +14,15 @@ final class TextToSpeechService: NSObject, AVSpeechSynthesizerDelegate {
     private let minRate: Float = 0.4
     private let maxTrackedPhrases = 200
 
+    private var speakContinuation: CheckedContinuation<Void, Never>?
+
     override init() {
         super.init()
         synthesizer.delegate = self
     }
 
-    func speak(_ text: String, in language: Language) {
+    /// Speak text and wait until TTS finishes. Use this to coordinate with recognition.
+    func speakAndWait(_ text: String, in language: Language) async {
         guard isEnabled else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -36,7 +39,7 @@ final class TextToSpeechService: NSObject, AVSpeechSynthesizerDelegate {
         utterance.rate = currentRate
         utterance.pitchMultiplier = 1.0
         utterance.preUtteranceDelay = 0.1
-        utterance.postUtteranceDelay = 0.2
+        utterance.postUtteranceDelay = 0.15
 
         if let voice = selectVoice(for: language) {
             utterance.voice = voice
@@ -44,12 +47,18 @@ final class TextToSpeechService: NSObject, AVSpeechSynthesizerDelegate {
             utterance.voice = AVSpeechSynthesisVoice(language: language.ttsVoiceLanguage)
         }
 
-        synthesizer.speak(utterance)
         AppLogger.tts.debug("Speaking (\(language.displayName)): \(trimmed.prefix(40))")
+
+        await withCheckedContinuation { continuation in
+            self.speakContinuation = continuation
+            self.synthesizer.speak(utterance)
+        }
     }
 
     func stop() {
         synthesizer.stopSpeaking(at: .immediate)
+        speakContinuation?.resume()
+        speakContinuation = nil
     }
 
     func clearHistory() {
@@ -102,13 +111,19 @@ final class TextToSpeechService: NSObject, AVSpeechSynthesizerDelegate {
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
-            self?.isSpeaking = false
+            guard let self else { return }
+            self.isSpeaking = false
+            self.speakContinuation?.resume()
+            self.speakContinuation = nil
         }
     }
 
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         Task { @MainActor [weak self] in
-            self?.isSpeaking = false
+            guard let self else { return }
+            self.isSpeaking = false
+            self.speakContinuation?.resume()
+            self.speakContinuation = nil
         }
     }
 }
