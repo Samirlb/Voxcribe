@@ -12,7 +12,6 @@ struct SettingsView: View {
                     translationSection
                     ttsSection
                     displaySection
-                    conversationSection
                     aboutSection
                 }
                 .padding(.horizontal, VoxcribeTokens.Spacing.lg)
@@ -248,66 +247,6 @@ struct SettingsView: View {
             .padding(.horizontal, VoxcribeTokens.Spacing.md)
             .padding(.bottom, VoxcribeTokens.Spacing.xs)
         }
-    }
-
-    // MARK: - Conversation
-
-    private var conversationSection: some View {
-        SettingsCard {
-            SettingsCardHeader(icon: "person.2", title: "Conversation Mode", color: .cyan)
-
-            SettingsRow {
-                Label("Enable", systemImage: "arrow.left.arrow.right")
-                    .font(.subheadline)
-                Spacer()
-                Toggle("", isOn: $settings.conversationMode)
-                    .labelsHidden()
-                    .tint(.cyan)
-            }
-
-            if settings.conversationMode {
-                Divider().padding(.leading, 36)
-
-                SettingsRow {
-                    HStack(spacing: VoxcribeTokens.Spacing.sm) {
-                        Circle()
-                            .fill(VoxcribeTokens.Colors.speakerA)
-                            .frame(width: 8, height: 8)
-                        Text("Speaker A")
-                            .font(.subheadline)
-                    }
-                    Spacer()
-                    Picker("", selection: $settings.conversationLanguageA) {
-                        ForEach(Language.allCases) { lang in
-                            Text(lang.displayName).tag(lang)
-                        }
-                    }
-                    .labelsHidden()
-                    .tint(.secondary)
-                }
-
-                Divider().padding(.leading, 36)
-
-                SettingsRow {
-                    HStack(spacing: VoxcribeTokens.Spacing.sm) {
-                        Circle()
-                            .fill(VoxcribeTokens.Colors.speakerB)
-                            .frame(width: 8, height: 8)
-                        Text("Speaker B")
-                            .font(.subheadline)
-                    }
-                    Spacer()
-                    Picker("", selection: $settings.conversationLanguageB) {
-                        ForEach(Language.allCases) { lang in
-                            Text(lang.displayName).tag(lang)
-                        }
-                    }
-                    .labelsHidden()
-                    .tint(.secondary)
-                }
-            }
-        }
-        .animation(VoxcribeTokens.Animation.standard, value: settings.conversationMode)
     }
 
     // MARK: - About

@@ -17,6 +17,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
     private var recognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
+    private var pendingBuffers: [AVAudioPCMBuffer] = []
 
     private var restartTimer: Timer?
     private var retryCount = 0
@@ -53,7 +54,18 @@ final class SpeechRecognitionService: @unchecked Sendable {
 
     func appendAudioBuffer(_ buffer: AVAudioPCMBuffer) {
         guard !isPaused else { return }
-        recognitionRequest?.append(buffer)
+        if let request = recognitionRequest {
+            for pending in pendingBuffers {
+                request.append(pending)
+            }
+            pendingBuffers.removeAll()
+            request.append(buffer)
+        } else if isRestarting {
+            pendingBuffers.append(buffer)
+            if pendingBuffers.count > 10 {
+                pendingBuffers.removeFirst()
+            }
+        }
     }
 
     func stopRecognition() {
@@ -67,6 +79,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
         recognitionTask = nil
         recognitionRequest = nil
         recognizer = nil
+        pendingBuffers.removeAll()
 
         isRecognizing = false
         isPaused = false
@@ -89,6 +102,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
         recognitionRequest?.endAudio()
         recognitionTask = nil
         recognitionRequest = nil
+        pendingBuffers.removeAll()
 
         AppLogger.speech.info("Speech recognition paused (TTS)")
     }
@@ -142,6 +156,12 @@ final class SpeechRecognitionService: @unchecked Sendable {
         request.requiresOnDeviceRecognition = !isOnline
 
         recognitionRequest = request
+
+        // Flush audio that arrived during restart
+        for pending in pendingBuffers {
+            request.append(pending)
+        }
+        pendingBuffers.removeAll()
 
         recognitionTask = recognizer.recognitionTask(with: request) { [weak self] result, error in
             guard let self else { return }
@@ -201,7 +221,7 @@ final class SpeechRecognitionService: @unchecked Sendable {
 
         Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(150))
             self.isRestarting = false
             guard self.isRecognizing, !self.isPaused else { return }
             self.beginRecognitionTask()

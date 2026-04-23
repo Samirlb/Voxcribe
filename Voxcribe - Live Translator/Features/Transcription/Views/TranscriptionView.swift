@@ -65,6 +65,12 @@ struct TranscriptionView: View {
                 SettingsView(settings: settings)
             }
             .onAppear { syncSettings() }
+            .onChange(of: settings.sourceLanguage) {
+                syncSettings()
+                if viewModel.state == .listening && !settings.conversationMode {
+                    viewModel.speechService.changeLanguage(settings.sourceLanguage)
+                }
+            }
             .onChange(of: settings.targetLanguage) { syncSettings() }
             .onChange(of: settings.translationEngine) { syncSettings() }
             .onChange(of: settings.ttsEnabled) { syncSettings() }
@@ -72,6 +78,9 @@ struct TranscriptionView: View {
             .onChange(of: settings.showPartialResults) { syncSettings() }
             .onChange(of: settings.silenceTimeout) { syncSettings() }
             .onChange(of: settings.conversationMode) { syncSettings() }
+            .onChange(of: settings.conversationLanguageA) { syncSettings() }
+            .onChange(of: settings.conversationLanguageB) { syncSettings() }
+            .onChange(of: settings.audioSource) { syncSettings() }
             .onChange(of: settings.ttsRate) {
                 viewModel.ttsService.setRate(settings.ttsRate)
             }
@@ -121,9 +130,23 @@ struct TranscriptionView: View {
             } else {
                 stateIndicator
 
+                if settings.conversationMode && isActive {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(viewModel.conversationController.currentRecognizerLanguage == viewModel.conversationController.languageA
+                                  ? VoxcribeTokens.Colors.speakerA
+                                  : VoxcribeTokens.Colors.speakerB)
+                            .frame(width: 6, height: 6)
+                        Text(viewModel.conversationController.currentRecognizerLanguage.displayName)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
+
                 Spacer()
 
-                if let detected = viewModel.detectedLanguage {
+                if !settings.conversationMode, let detected = viewModel.detectedLanguage {
                     Text(detected.displayName)
                         .languagePill(color: .green)
                         .transition(.scale.combined(with: .opacity))
@@ -179,6 +202,9 @@ struct TranscriptionView: View {
 
     private var controlBar: some View {
         VStack(spacing: VoxcribeTokens.Spacing.sm) {
+            // Mode picker (Translate / Conversation)
+            modePicker
+
             // Audio source toggle (only when multiple sources available)
             if AudioSource.availableSources.count > 1 {
                 audioSourcePicker
@@ -188,8 +214,8 @@ struct TranscriptionView: View {
                 // Source language
                 languagePicker(
                     selection: settings.conversationMode
-                        ? $viewModel.conversationController.languageA
-                        : $viewModel.sourceLanguage,
+                        ? $settings.conversationLanguageA
+                        : $settings.sourceLanguage,
                     label: settings.conversationMode ? "A" : "From"
                 )
 
@@ -210,8 +236,8 @@ struct TranscriptionView: View {
                 // Target language
                 languagePicker(
                     selection: settings.conversationMode
-                        ? $viewModel.conversationController.languageB
-                        : $viewModel.targetLanguage,
+                        ? $settings.conversationLanguageB
+                        : $settings.targetLanguage,
                     label: settings.conversationMode ? "B" : "To"
                 )
 
@@ -233,44 +259,72 @@ struct TranscriptionView: View {
         .glassCard()
     }
 
+    private var modePicker: some View {
+        HStack(spacing: VoxcribeTokens.Spacing.sm) {
+            pillButton(
+                icon: "globe",
+                label: "Translate",
+                isSelected: !settings.conversationMode
+            ) {
+                settings.conversationMode = false
+            }
+            pillButton(
+                icon: "person.2.fill",
+                label: "Conversation",
+                isSelected: settings.conversationMode
+            ) {
+                settings.conversationMode = true
+            }
+        }
+    }
+
     private var audioSourcePicker: some View {
         HStack(spacing: VoxcribeTokens.Spacing.sm) {
             ForEach(AudioSource.availableSources) { source in
-                Button {
-                    guard !isActive else { return }
-                    withAnimation(VoxcribeTokens.Animation.smooth) {
-                        viewModel.audioSource = source
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: source.icon)
-                            .font(.system(size: 12, weight: .medium))
-                        Text(source.displayName)
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(viewModel.audioSource == source
-                                  ? Color.accentColor.opacity(0.2)
-                                  : Color.clear)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(viewModel.audioSource == source
-                                          ? Color.accentColor.opacity(0.5)
-                                          : Color.secondary.opacity(0.2),
-                                          lineWidth: 1)
-                    )
-                    .foregroundStyle(viewModel.audioSource == source
-                                    ? Color.accentColor : .secondary)
+                pillButton(
+                    icon: source.icon,
+                    label: source.displayName,
+                    isSelected: settings.audioSource == source
+                ) {
+                    settings.audioSource = source
                 }
-                .buttonStyle(.plain)
-                .disabled(isActive)
             }
         }
+    }
+
+    private func pillButton(icon: String, label: String, isSelected: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            guard !isActive else { return }
+            withAnimation(VoxcribeTokens.Animation.smooth) {
+                action()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected
+                          ? Color.accentColor.opacity(0.2)
+                          : Color.clear)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected
+                                  ? Color.accentColor.opacity(0.5)
+                                  : Color.secondary.opacity(0.2),
+                                  lineWidth: 1)
+            )
+            .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+        }
+        .buttonStyle(.plain)
+        .disabled(isActive)
     }
 
     private func languagePicker(selection: Binding<Language>, label: String) -> some View {
@@ -295,17 +349,16 @@ struct TranscriptionView: View {
     // MARK: - Sync
 
     private func syncSettings() {
+        viewModel.sourceLanguage = settings.sourceLanguage
         viewModel.targetLanguage = settings.targetLanguage
         viewModel.translationEngine = settings.translationEngine
         viewModel.ttsEnabled = settings.ttsEnabled
         viewModel.showOriginalText = settings.showOriginalText
         viewModel.showPartialResults = settings.showPartialResults
         viewModel.silenceTimeout = settings.silenceTimeout
+        viewModel.audioSource = settings.audioSource
         viewModel.conversationController.isActive = settings.conversationMode
-
-        if settings.conversationMode {
-            viewModel.conversationController.languageA = settings.conversationLanguageA
-            viewModel.conversationController.languageB = settings.conversationLanguageB
-        }
+        viewModel.conversationController.languageA = settings.conversationLanguageA
+        viewModel.conversationController.languageB = settings.conversationLanguageB
     }
 }

@@ -45,6 +45,10 @@ final class TranscriptionViewModel {
     private var lastPartialTextSnapshot: String = ""
     private var partialTextStableTime: Date = Date()
 
+    // Conversation mode: track when any text was last received for language switching
+    private var lastAnyTextTime: Date = Date()
+    private var lastLanguageSwitchTime: Date = .distantPast
+
     // MARK: - Lifecycle
 
     func startListening() {
@@ -54,6 +58,10 @@ final class TranscriptionViewModel {
         guard permissionsManager.allPermissionsGranted else {
             state = .error("Permissions not granted")
             return
+        }
+
+        if conversationController.isActive {
+            conversationController.start()
         }
 
         let language = conversationController.isActive
@@ -67,6 +75,8 @@ final class TranscriptionViewModel {
             speechService.startRecognition(language: language)
             state = .listening
             lastFinalizedText = ""
+            lastAnyTextTime = Date()
+            lastLanguageSwitchTime = Date()
             startSilenceDetection()
         } catch {
             state = .error(error.localizedDescription)
@@ -136,13 +146,13 @@ final class TranscriptionViewModel {
         speechService.onPartialResult = { [weak self] text in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                // Track whether the text content actually changed
                 if text != self.lastPartialTextSnapshot {
                     self.lastPartialTextSnapshot = text
                     self.partialTextStableTime = Date()
                 }
                 self.currentPartialText = text
                 self.lastSpeechTime = Date()
+                self.lastAnyTextTime = Date()
             }
         }
 
@@ -152,17 +162,16 @@ final class TranscriptionViewModel {
                 self.finalizeCurrentEntry(text: text)
                 self.currentPartialText = ""
                 self.lastSpeechTime = Date()
+                self.lastAnyTextTime = Date()
             }
         }
 
         speechService.onLanguageDetected = { [weak self] language in
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // Only use speech service language detection in translate mode
+                guard !self.conversationController.isActive else { return }
                 self.detectedLanguage = language
-
-                if self.conversationController.isActive {
-                    self.conversationController.assignSpeaker(detectedLanguage: language)
-                }
             }
         }
     }
@@ -182,9 +191,14 @@ final class TranscriptionViewModel {
         let speaker: Speaker?
 
         if conversationController.isActive {
-            source = conversationController.activeSpeakerLanguage()
-            target = conversationController.targetLanguageForCurrentSpeaker()
-            speaker = conversationController.currentSpeaker
+            let result = conversationController.processFinalizedText(trimmed)
+            source = result.sourceLanguage
+            target = result.targetLanguage
+            speaker = result.speaker
+
+            // Switch recognizer to the next expected language for the other speaker
+            speechService.changeLanguage(result.nextRecognizerLanguage)
+            lastLanguageSwitchTime = Date()
         } else {
             source = detectedLanguage ?? sourceLanguage
             target = targetLanguage
@@ -273,24 +287,36 @@ final class TranscriptionViewModel {
         lastSpeechTime = Date()
         lastPartialTextSnapshot = ""
         partialTextStableTime = Date()
+        lastAnyTextTime = Date()
 
         silenceTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard self.state == .listening, !self.isSpeakingTTS else { return }
-                guard !self.currentPartialText.isEmpty else { return }
 
                 let now = Date()
+
+                // Conversation mode: if no text at all for a while, try the other language
+                if self.conversationController.isActive && self.currentPartialText.isEmpty {
+                    let noTextDuration = now.timeIntervalSince(self.lastAnyTextTime)
+                    let timeSinceSwitch = now.timeIntervalSince(self.lastLanguageSwitchTime)
+                    if noTextDuration > self.silenceTimeout + 2 && timeSinceSwitch > 3 {
+                        let otherLang = self.conversationController.switchToOtherLanguage()
+                        self.speechService.changeLanguage(otherLang)
+                        self.lastAnyTextTime = Date()
+                        self.lastLanguageSwitchTime = Date()
+                        AppLogger.speech.info("Conversation: no speech, switching to \(otherLang.displayName)")
+                    }
+                    return
+                }
+
+                guard !self.currentPartialText.isEmpty else { return }
+
                 let silenceDuration = now.timeIntervalSince(self.lastSpeechTime)
                 let textStableDuration = now.timeIntervalSince(self.partialTextStableTime)
                 let isQuiet = self.audioService.audioLevel < 0.05
 
-                // Finalize if audio is quiet and no new partial results
                 let silenceTriggered = silenceDuration > self.silenceTimeout && isQuiet
-
-                // Finalize if partial text hasn't changed for silenceTimeout
-                // (handles languages like Chinese where isFinal rarely fires,
-                // and system audio where audio level never drops)
                 let stabilityTriggered = textStableDuration > self.silenceTimeout
 
                 if silenceTriggered || stabilityTriggered {
@@ -299,8 +325,11 @@ final class TranscriptionViewModel {
                     self.lastPartialTextSnapshot = ""
                     self.finalizeCurrentEntry(text: text)
 
-                    // Restart the recognition task to clear accumulated state
-                    self.speechService.forceRestart()
+                    // In translate mode, restart to clear accumulated state
+                    // In conversation mode, language switch in finalizeCurrentEntry already restarts
+                    if !self.conversationController.isActive {
+                        self.speechService.forceRestart()
+                    }
                 }
             }
         }
