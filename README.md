@@ -9,7 +9,7 @@ Capture audio from your microphone or system audio, transcribe it live, and get 
 [![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=flat-square&logo=swift&logoColor=white)](https://swift.org)
 [![Platform](https://img.shields.io/badge/Platform-macOS%2026%20|%20iOS%2026-007AFF?style=flat-square&logo=apple&logoColor=white)](https://developer.apple.com)
 [![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue?style=flat-square&logo=swift&logoColor=white)](https://developer.apple.com/swiftui/)
-[![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-green?style=flat-square)](LICENSE)
 
 <br/>
 
@@ -268,7 +268,7 @@ Contributions are welcome! Here's how to get started:
 
 ## 📄 License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 — see the [LICENSE](LICENSE) file for details.
 
 ---
 
@@ -284,6 +284,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 
 **⭐ Star this repo if you find it useful!**
 
-Made with 🎙️ by [Samir](https://github.com/yourusername)
+Made with 🎙️ by [Samir](https://github.com/Samirlb)
 
 </div>
